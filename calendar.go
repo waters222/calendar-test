@@ -2,6 +2,7 @@ package calendar
 
 import (
 	"fmt"
+	"github.com/pkg/errors"
 	"sort"
 )
 
@@ -45,7 +46,12 @@ func FindOverlapPairsBrutal(evts CalendarEvents) (ret []CalendarPair) {
 	for i := 0; i < length; i++ {
 		for p := i + 1; p < length; p++ {
 			if evts[i].isOverlap(evts[p]) {
-				ret = append(ret, CalendarPair{evts[i].Id, evts[p].Id})
+				if evts[i].Id < evts[p].Id {
+					ret = append(ret, CalendarPair{evts[i].Id, evts[p].Id})
+				} else {
+					ret = append(ret, CalendarPair{evts[p].Id, evts[i].Id})
+				}
+
 			}
 		}
 	}
@@ -131,9 +137,11 @@ func (c *Segment) SplitStart(evt CalendarEvent) []Segment {
 	if c.Start == evt.Start {
 		return []Segment{{c.Start, c.End, append(c.Ids, evt.Id)}}
 	} else {
+		newIds := make([]int, len(c.Ids))
+		copy(newIds, c.Ids)
 		return []Segment{
 			{c.Start, evt.Start - 1, c.Ids},
-			{evt.Start, c.End, append(c.Ids, evt.Id)},
+			{evt.Start, c.End, append(newIds, evt.Id)},
 		}
 	}
 
@@ -145,19 +153,27 @@ func (c *Segment) SplitWithin(evt CalendarEvent) []Segment {
 			{c.Start, c.End, append(c.Ids, evt.Id)},
 		}
 	} else if c.Start == evt.Start {
+		newIds := make([]int, len(c.Ids))
+		copy(newIds, c.Ids)
 		return []Segment{
-			{c.Start, evt.End, append(c.Ids, evt.Id)},
+			{c.Start, evt.End, append(newIds, evt.Id)},
 			{evt.End + 1, c.End, c.Ids},
 		}
 	} else if c.End == evt.End {
+		newIds := make([]int, len(c.Ids))
+		copy(newIds, c.Ids)
 		return []Segment{
 			{c.Start, evt.Start - 1, c.Ids},
-			{evt.Start, c.End, append(c.Ids, evt.Id)},
+			{evt.Start, c.End, append(newIds, evt.Id)},
 		}
 	} else {
+		newIds0 := make([]int, len(c.Ids))
+		copy(newIds0, c.Ids)
+		newIds1 := make([]int, len(c.Ids))
+		copy(newIds1, c.Ids)
 		return []Segment{
-			{c.Start, evt.Start - 1, c.Ids},
-			{evt.Start, evt.End, append(c.Ids, evt.Id)},
+			{c.Start, evt.Start - 1, newIds0},
+			{evt.Start, evt.End, append(newIds1, evt.Id)},
 			{evt.End + 1, c.End, c.Ids},
 		}
 	}
@@ -170,8 +186,10 @@ func (c *Segment) SplitEnd(evt CalendarEvent) []Segment {
 			{c.Start, c.End, append(c.Ids, evt.Id)},
 		}
 	} else {
+		newIds := make([]int, len(c.Ids))
+		copy(newIds, c.Ids)
 		return []Segment{
-			{c.Start, evt.End, append(c.Ids, evt.Id)},
+			{c.Start, evt.End, append(newIds, evt.Id)},
 			{evt.End + 1, c.End, c.Ids},
 		}
 	}
@@ -183,31 +201,91 @@ type Segments []Segment
 func (c Segments) len() int {
 	return len(c)
 }
-func (c Segments) FindSeg(value int64) (idx int) {
-	idx = len(c) / 2
-	for {
+
+var errorTooSmall = errors.New("too small")
+var errorTooLarge = errors.New("too large")
+var errorInBetween = errors.New("in between")
+
+func (c Segments) FindSeg(value int64) (idx int, err error) {
+	left := 0
+	right := len(c)
+	for left < right {
+		idx = (left + right) / 2
 		result := c[idx].IsWithin(value)
 		if result < 0 {
 			// search left
-			idx--
-			if idx < 0 {
-				// underflow
-				return
-			}
-			idx = idx / 2
+			right = idx
 		} else if result > 0 {
 			// search right
-			idx++
-			if idx >= len(c) {
-				// overflow
-				return
-			}
-			idx = (idx + +1 + len(c)) / 2
+			left = idx + 1
 		} else {
-			//found it
 			return
 		}
 	}
+	if right == 0 {
+		err = errorTooSmall
+	} else if left == len(c) {
+		err = errorTooLarge
+	} else {
+		err = errorInBetween
+
+	}
+	return
+}
+
+func (c Segments) InsertSegments(idx int, segs []Segment) Segments {
+	segs = append(segs, c[idx:]...)
+	return append(c[:idx], segs...)
+
+}
+
+func (c Segments) AddSeg(idx int, id int, start, end int64, pairs map[CalendarPair]bool) Segments {
+	var insertions []Segment
+
+	finished := false
+	leftSegs := c[:idx]
+	for idx < len(c) {
+		seg := c[idx]
+		if end < seg.Start {
+			insertions = append(insertions, Segment{start, end, []int{id}})
+			finished = true
+			break
+		} else {
+			// adding the pair into hash map
+			for _, v := range seg.Ids {
+				pair := CalendarPair{FirstId: v, SecondId: id}
+				if _, ok := pairs[pair]; !ok {
+					pairs[pair] = true
+				}
+			}
+			if start < seg.Start {
+				insertions = append(insertions, Segment{start, seg.Start - 1, []int{id}})
+			}
+
+			if end <= seg.End {
+				insertions = append(insertions, seg.SplitEnd(CalendarEvent{id, start, end})...)
+				finished = true
+				idx++
+				break
+			} else {
+				seg.Ids = append(seg.Ids, id)
+				insertions = append(insertions, seg)
+				start = seg.End + 1
+				idx++
+			}
+
+		}
+	}
+
+	if finished {
+		if idx < len(c) {
+			insertions = append(insertions, c[idx:]...)
+		}
+	} else {
+		insertions = append(insertions, Segment{start, end, []int{id}})
+	}
+
+	return append(leftSegs, insertions...)
 }
 
 func FindOverlapPairsSeg(evts CalendarEvents) (ret []CalendarPair) {
@@ -217,67 +295,48 @@ func FindOverlapPairsSeg(evts CalendarEvents) (ret []CalendarPair) {
 	if length < 2 {
 		return
 	}
+	pairs := make(map[CalendarPair]bool)
 
 	segs := Segments{{Start: evts[0].Start, End: evts[0].End, Ids: []int{evts[0].Id}}}
 	for i := 1; i < length; i++ {
 		evt := evts[i]
 		// find the segment which include start
-		idx := segs.FindSeg(evt.Start)
-		if idx < 0 {
+		idx, err := segs.FindSeg(evt.Start)
+		if err == errorTooSmall {
 			// underflow
-			if evt.End < segs[0].Start {
-				temp := Segments{Segment{Start: evt.Start, End: evt.End, Ids: []int{evt.Id}}}
-				segs = append(temp, segs...)
-			} else {
-				for _, id := range segs[0].Ids {
-					ret = append(ret, CalendarPair{id, evt.Id})
-				}
-				temp := Segments{Segment{Start: evt.Start, End: segs[0].Start - 1, Ids: []int{evt.Id}}}
-				temp = append(temp, segs[0].SplitEnd(evt)...)
-				segs = append(temp, segs[1:]...)
-			}
-		} else if idx == segs.len() {
+			segs = segs.AddSeg(0, evt.Id, evt.Start, evt.End, pairs)
+		} else if err == errorTooLarge {
 			// overflow
 			segs = append(segs, Segment{Start: evt.Start, End: evt.End, Ids: []int{evt.Id}})
+		} else if err == errorInBetween {
+			if evt.Start >= segs[idx].Start {
+				idx++
+			}
+			segs = segs.AddSeg(idx, evt.Id, evt.Start, evt.End, pairs)
 		} else {
 			// within
-			if evt.End <= segs[idx].End {
-				for _, id := range segs[idx].Ids {
-					ret = append(ret, CalendarPair{id, evt.Id})
-				}
-				// total within
-				temp := append(segs[:idx], segs[idx].SplitEnd(evt)...)
-				segs = append(temp, segs[idx+1:]...)
-			} else {
-				// we need search right for more overlaps
-				for _, id := range segs[idx].Ids {
-					ret = append(ret, CalendarPair{id, evt.Id})
-				}
-				temp := append(segs[:idx], segs[idx].SplitStart(evt)...)
-				end := false
-				for p := idx + 1; p < segs.len(); p++ {
-					for _, id := range segs[p].Ids {
-						ret = append(ret, CalendarPair{id, evt.Id})
-					}
-					if evt.End <= segs[p].End {
-						// last one
-						temp = append(temp, segs[p].SplitEnd(evt)...)
-						segs = append(temp, segs[p+1:]...)
-						end = true
-						break
-					} else {
-						segs[p].Ids = append(segs[p].Ids, evt.Id)
-						temp = append(temp, segs[p])
-					}
-				}
-				if !end {
-					// our new seg is over the last one
-					// so append a new seg here
-					segs = append(segs, Segment{Start: segs[segs.len()-1].End + 1, End: evt.End, Ids: []int{evt.Id}})
+			for _, id := range segs[idx].Ids {
+				pair := CalendarPair{FirstId: id, SecondId: evt.Id}
+				if _, ok := pairs[pair]; !ok {
+					pairs[pair] = true
 				}
 			}
+			if evt.End <= segs[idx].End {
+				// totally within
+				splits := append(segs[idx].SplitWithin(evt), segs[idx+1:]...)
+				segs = append(segs[:idx], splits...)
+			} else {
+				newStart := segs[idx].End + 1
+				splits := segs[idx].SplitStart(evt)
+				offset := len(splits)
+				splits = append(splits, segs[idx+1:]...)
+				segs = append(segs[:idx], splits...)
+				segs = segs.AddSeg(idx+offset, evt.Id, newStart, evt.End, pairs)
+			}
 		}
-
+	}
+	for pair := range pairs {
+		ret = append(ret, pair)
 	}
 	return
 }

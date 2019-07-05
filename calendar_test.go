@@ -1,35 +1,75 @@
 package calendar
 
 import (
+	"fmt"
+	"math/rand"
+	"os"
 	"testing"
 )
 
-func compareTwoPairArrays(left, right []CalendarPair) bool {
-	if len(left) != len(right) {
-		return false
+var testEvents []CalendarEvent
+
+func TestMain(m *testing.M) {
+
+	rand.Seed(111)
+	count := 5000
+	maxValue := 1000000
+	// lets create benchmark needed array
+	testEvents = make([]CalendarEvent, count)
+	for i := 0; i < count; i++ {
+		start := rand.Int63n(int64(maxValue))
+		left := int64(maxValue) - start
+		end := rand.Int63n(left) + start
+		temp := CalendarEvent{i, start, end}
+		if !temp.IsValid() {
+			fmt.Println(fmt.Sprintf("[ERROR] calenar event is invalid: %s", temp.ToString()))
+			os.Exit(1)
+		}
+		testEvents[i] = temp
 	}
+	m.Run()
+}
+
+func compareTwoPairArrays(left, right []CalendarPair) (bool, []CalendarPair, []CalendarPair) {
+	ret := true
+	if len(left) != len(right) {
+		ret = false
+	}
+
+	length := len(right)
+
+	var leftNotFound []CalendarPair
+
 	for _, evt := range left {
 		found := false
-		for i, temp := range right {
+		for i := 0; i < length; i++ {
+			temp := right[i]
 			if evt.FirstId == temp.FirstId &&
 				evt.SecondId == temp.SecondId {
 				// found
 				found = true
 				if i+1 < len(right) {
-					if i > 0 {
-						right = append(right[:i-1], right[i+1:]...)
-					} else {
-						right = right[i+1:]
-					}
+					right[i] = right[length-1]
+					length--
 				}
 				break
 			}
 		}
 		if !found {
-			return false
+			ret = false
+			leftNotFound = append(leftNotFound, evt)
 		}
 	}
-	return true
+	return ret, leftNotFound, right[0:length]
+}
+
+func printPairs(evts []CalendarEvent, pairs []CalendarPair) {
+	for _, pair := range pairs {
+		fmt.Println(fmt.Sprintf("pair: %d, %d -> %d, %d & %d, %d", pair.FirstId, pair.SecondId,
+			evts[pair.FirstId].Start, evts[pair.FirstId].End,
+			evts[pair.SecondId].Start, evts[pair.SecondId].End))
+	}
+
 }
 
 func TestIsEventValid(t *testing.T) {
@@ -356,6 +396,77 @@ func TestSegment_SplitWithin(t *testing.T) {
 	}
 }
 
+func TestSegments_FindSeg(t *testing.T) {
+	segs := Segments{
+		{10, 100, nil},
+		{200, 300, nil},
+		{400, 500, nil},
+		{600, 700, nil},
+		{800, 900, nil},
+	}
+
+	if _, err := segs.FindSeg(9); err != errorTooSmall {
+		t.Log("should be too small")
+		t.FailNow()
+	}
+
+	if _, err := segs.FindSeg(901); err != errorTooLarge {
+		t.Log("should be too large")
+		t.FailNow()
+	}
+
+	if idx, err := segs.FindSeg(101); err != errorInBetween {
+		t.Log("should be in between")
+		t.FailNow()
+	} else if idx != 0 {
+		t.Logf("in between should be 0 instead of %d", idx)
+		t.FailNow()
+	}
+
+	if idx, err := segs.FindSeg(350); err != errorInBetween {
+		t.Log("should be in between")
+		t.FailNow()
+	} else if idx != 1 {
+		t.Logf("in between should be 1 instead of %d", idx)
+		t.FailNow()
+	}
+
+	if _, err := segs.FindSeg(501); err != errorInBetween {
+		t.Log("should be in between")
+		t.FailNow()
+	}
+	if _, err := segs.FindSeg(701); err != errorInBetween {
+		t.Log("should be in between")
+		t.FailNow()
+	}
+
+	if idx, err := segs.FindSeg(201); err != nil || idx != 1 {
+
+		t.FailNow()
+	}
+
+	if idx, err := segs.FindSeg(20); err != nil || idx != 0 {
+
+		t.FailNow()
+	}
+	if idx, err := segs.FindSeg(450); err != nil || idx != 2 {
+
+		t.FailNow()
+	}
+	if idx, err := segs.FindSeg(800); err != nil || idx != 4 {
+
+		t.FailNow()
+	}
+
+	segs = Segments{
+		{10, 15, nil},
+		{16, 71, nil},
+	}
+	if idx, err := segs.FindSeg(16); err != nil || idx != 1 {
+		t.FailNow()
+	}
+}
+
 func TestFindOverlapPairsSeg(t *testing.T) {
 	events := []CalendarEvent{{0, 0, 100}, {1, 0, 100}}
 	ret := FindOverlapPairsSeg(events)
@@ -382,7 +493,7 @@ func TestFindOverlapPairsSeg(t *testing.T) {
 	events = []CalendarEvent{{0, 0, 100}, {1, 101, 200}}
 	ret = FindOverlapPairsSeg(events)
 	if len(ret) != 0 {
-		t.Logf("it should has no overlap")
+		t.Logf("it should has no overlap: %v", ret)
 		t.FailNow()
 	}
 
@@ -392,12 +503,6 @@ func TestFindOverlapPairsSeg(t *testing.T) {
 		t.Logf("it should return 2 pair instead of %d", len(ret))
 		t.FailNow()
 	}
-	if ret[0].FirstId != 0 || ret[0].SecondId != 2 || ret[1].FirstId != 1 || ret[1].SecondId != 2 {
-		t.Logf("first pair %v", ret[0])
-		t.Logf("second pair %v", ret[1])
-		t.FailNow()
-	}
-
 	events = []CalendarEvent{{0, 0, 100}, {1, 101, 200}, {2, 0, 2000}, {3, 101, 200}}
 	ret = FindOverlapPairsSeg(events)
 	if len(ret) != 4 {
@@ -405,7 +510,72 @@ func TestFindOverlapPairsSeg(t *testing.T) {
 		t.FailNow()
 	}
 	baseline := FindOverlapPairsBrutal(events)
-	if !compareTwoPairArrays(ret, baseline) {
+	if isSame, leftNotFound, rightNotFound := compareTwoPairArrays(ret, baseline); !isSame {
+		printPairs(events, leftNotFound)
+		fmt.Println("=========================")
+		printPairs(events, rightNotFound)
 		t.FailNow()
+	}
+
+	events = []CalendarEvent{{0, 0, 100}, {1, 130, 200}, {3, 150, 160}, {4, 110, 120}}
+	ret = FindOverlapPairsSeg(events)
+	if len(ret) != 1 {
+		t.Logf("it should return  pair instead of %d", len(ret))
+		t.FailNow()
+	}
+	baseline = FindOverlapPairsBrutal(events)
+	if isSame, leftNotFound, rightNotFound := compareTwoPairArrays(ret, baseline); !isSame {
+		printPairs(events, leftNotFound)
+		fmt.Println("=========================")
+		printPairs(events, rightNotFound)
+		t.FailNow()
+	}
+}
+
+func TestFindOverlapPairsSort(t *testing.T) {
+	events := make([]CalendarEvent, len(testEvents))
+	copy(events, testEvents)
+	ret := FindOverlapPairsSort(events)
+	baseline := FindOverlapPairsBrutal(events)
+	if isSame, leftNotFound, rightNotFound := compareTwoPairArrays(ret, baseline); !isSame {
+		printPairs(events, leftNotFound)
+		fmt.Println("=========================")
+		printPairs(events, rightNotFound)
+		t.FailNow()
+	}
+}
+
+func TestFindOverlapPairsSeg2(t *testing.T) {
+	events := make([]CalendarEvent, len(testEvents))
+	copy(events, testEvents)
+	ret := FindOverlapPairsSeg(events)
+	baseline := FindOverlapPairsBrutal(events)
+	if isSame, leftNotFound, rightNotFound := compareTwoPairArrays(ret, baseline); !isSame {
+		fmt.Println("==== seg ====")
+		printPairs(events, leftNotFound)
+		fmt.Println("########")
+		fmt.Println("==== baseline ====")
+		printPairs(events, rightNotFound)
+		fmt.Println("########")
+		t.FailNow()
+	}
+}
+
+func Benchmark_brutal(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		FindOverlapPairsBrutal(testEvents)
+	}
+
+}
+
+func Benchmark_seq(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		FindOverlapPairsBrutal(testEvents)
+	}
+}
+
+func Benchmark_sort(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		FindOverlapPairsBrutal(testEvents)
 	}
 }
