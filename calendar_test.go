@@ -12,8 +12,8 @@ var testEvents []CalendarEvent
 func TestMain(m *testing.M) {
 
 	rand.Seed(111)
-	count := 5000
-	maxValue := 1000000
+	count := 500
+	maxValue := 1000
 	// lets create benchmark needed array
 	testEvents = make([]CalendarEvent, count)
 	for i := 0; i < count; i++ {
@@ -532,6 +532,27 @@ func TestFindOverlapPairsSeg(t *testing.T) {
 	}
 }
 
+func TestFindOverlapPairBucket(t *testing.T) {
+	events := []CalendarEvent{{0, 0, 100}, {1, 0, 110}}
+	ret := FindOverlapPairBucket(events, 50)
+	if len(ret) != 1 {
+		t.Logf("it should return 1 pair instead of %d", len(ret))
+		t.FailNow()
+	}
+	if ret[0].FirstId != 0 || ret[0].SecondId != 1 {
+		t.Logf("firstId %d, secondId %d is wrong", ret[0].FirstId, ret[0].SecondId)
+		t.FailNow()
+	}
+
+	events = []CalendarEvent{{0, 0, 100}, {1, 101, 200}, {2, 0, 2000}}
+	ret = FindOverlapPairBucket(events, 50)
+	if len(ret) != 2 {
+		t.Logf("it should return 2 pair instead of %d", len(ret))
+		t.FailNow()
+	}
+
+}
+
 func TestFindOverlapPairsSort(t *testing.T) {
 	events := make([]CalendarEvent, len(testEvents))
 	copy(events, testEvents)
@@ -561,11 +582,17 @@ func TestFindOverlapPairsSeg2(t *testing.T) {
 	}
 }
 
+//
 func Benchmark_brutal(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		FindOverlapPairsBrutal(testEvents)
 	}
 
+}
+func Benchmark_bucket(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		FindOverlapPairBucket(testEvents, 200)
+	}
 }
 
 func Benchmark_seq(b *testing.B) {

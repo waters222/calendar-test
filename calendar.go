@@ -340,3 +340,69 @@ func FindOverlapPairsSeg(evts CalendarEvents) (ret []CalendarPair) {
 	}
 	return
 }
+
+type bucketSeg struct {
+	evts []*CalendarEvent
+}
+
+func (c *bucketSeg) Add(event *CalendarEvent) {
+	c.evts = append(c.evts, event)
+}
+
+func (c *bucketSeg) GetPair(event *CalendarEvent) (ret []CalendarPair) {
+	for _, e := range c.evts {
+		if e.isOverlap(*event) {
+			ret = append(ret, CalendarPair{e.Id, event.Id})
+		}
+	}
+	return
+}
+
+func (c *CalendarEvent) getHash(size int64) (start, end int64) {
+	start = c.Start / size
+	end = c.End / size
+	return
+}
+
+func FindOverlapPairBucket(evts CalendarEvents, size int64) (ret []CalendarPair) {
+	buckets := make(map[int64]*bucketSeg)
+	pairs := make(map[CalendarPair]bool)
+	for idx := range evts {
+		start, end := evts[idx].getHash(size)
+		if bucket, ok := buckets[start]; !ok {
+			buckets[start] = &bucketSeg{[]*CalendarEvent{&evts[idx]}}
+		} else {
+			newPairs := bucket.GetPair(&evts[idx])
+			for i := 0; i < len(newPairs); i++ {
+				pairs[newPairs[i]] = true
+			}
+			bucket.Add(&evts[idx])
+		}
+		if end > start {
+			if bucket, ok := buckets[end]; !ok {
+				buckets[end] = &bucketSeg{[]*CalendarEvent{&evts[idx]}}
+			} else {
+				newPairs := bucket.GetPair(&evts[idx])
+				for i := 0; i < len(newPairs); i++ {
+					pairs[newPairs[i]] = true
+				}
+				bucket.Add(&evts[idx])
+			}
+			for k := start + 1; k < end; k++ {
+				if bucket, ok := buckets[end]; !ok {
+					buckets[end] = &bucketSeg{[]*CalendarEvent{&evts[idx]}}
+				} else {
+					for i := 0; i < len(bucket.evts); i++ {
+						pairs[CalendarPair{bucket.evts[i].Id, evts[idx].Id}] = true
+					}
+					bucket.Add(&evts[idx])
+				}
+			}
+		}
+
+	}
+	for pair := range pairs {
+		ret = append(ret, pair)
+	}
+	return
+}
